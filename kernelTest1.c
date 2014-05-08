@@ -211,65 +211,86 @@ void consumer2(){
 		displayNumber(2, counter);
 	}
 }
-
+#define CLEAR(i) IOWR_ALTERA_AVALON_PIO_DATA(lcdZones[i], 0)
+#define PRINT(i) IOWR_ALTERA_AVALON_PIO_DATA(lcdZones[i], digitCodes[i])
 void test0() {
-	int i, j;
+	int j;
 	while (1) {
-		for (i = 0; i < BLINKS; i++) {
-			enterMonitor(dummyMonitor1);
-			//IOWR_ALTERA_AVALON_PIO_DATA(lcdZones[0], 0);
-			yield();
-			for (j = 0; j < PAUSE; j++);
-			IOWR_ALTERA_AVALON_PIO_DATA(lcdZones[0], digitCodes[0]);
-			yield();
-			for (j = 0; j < PAUSE; j++);
-			exitMonitor();
-		}
-
+		enterMonitor(dummyMonitor1);
+		wait();
+		CLEAR(0);
+		yield();
+		for (j = 0; j < PAUSE; j++);
+		wait();
+		PRINT(0);
+		yield();
+		exitMonitor();
+		for (j = 0; j < PAUSE; j++);
 	}
 }
 
 void test1() {
-	int i, j;
+	int j;
 	while (1) {
+		enterMonitor(dummyMonitor2);
 		enterMonitor(dummyMonitor1);
-		for (i = 0; i < BLINKS; i++) {
-			IOWR_ALTERA_AVALON_PIO_DATA(lcdZones[1], 0);
-			yield();
-			for (j = 0; j < PAUSE; j++);
-			IOWR_ALTERA_AVALON_PIO_DATA(lcdZones[1], digitCodes[1]);
-			yield();
-			for (j = 0; j < PAUSE; j++);
-		}
+		yield();
+		notifyAll();
+		yield();
+		CLEAR(1);
+		yield();
+		for (j = 0; j < PAUSE; j++);
+		yield();
+		PRINT(1);
+		yield();
 		exitMonitor();
+		exitMonitor();
+		for (j = 0; j < PAUSE; j++);
 	}
 }
 
-//int main() {
-//	IOWR_ALTERA_AVALON_PIO_DATA(LED_COLOR_BASE, LED_COLOR_RESET_VALUE);
-//	initBuffer(&b0);
-//	initBuffer(&b1);
-//	initEventBuffer(&b2);
-//	dummyMonitor1 = createMonitor();
-//	dummyMonitor2 = createMonitor();
-//
-//	createProcess(consumer0, STACK_SIZE);
-//	createProcess(consumer1, STACK_SIZE);
-//	createProcess(consumer2, STACK_SIZE);
-//	createProcess(producer, STACK_SIZE);
-//
-//	start();
-//	return 0;
-//}
+void test2() {
+	int j;
+	while (1) {
+		enterMonitor(dummyMonitor2);
+		yield();
+		CLEAR(2);
+		for (j = 0; j < PAUSE; j++);
+		yield();
+		PRINT(2);
+		exitMonitor();
+		for (j = 0; j < PAUSE; j++);
+	}
+}
 
-int main(void) {
+int main() {
 	IOWR_ALTERA_AVALON_PIO_DATA(LED_COLOR_BASE, LED_COLOR_RESET_VALUE);
-
+	initBuffer(&b0);
+	initBuffer(&b1);
+	initEventBuffer(&b2);
 	dummyMonitor1 = createMonitor();
+	dummyMonitor2 = createMonitor();
 
-	createProcess(test0, STACK_SIZE);
-	createProcess(test1, STACK_SIZE);
+	createProcess(consumer0, STACK_SIZE);
+	createProcess(consumer1, STACK_SIZE);
+	createProcess(consumer2, STACK_SIZE);
+	createProcess(producer, STACK_SIZE);
 
 	start();
 	return 0;
 }
+
+//int main(void) {
+//	IOWR_ALTERA_AVALON_PIO_DATA(LED_COLOR_BASE, LED_COLOR_RESET_VALUE);
+//
+//	dummyMonitor1 = createMonitor();
+//	dummyMonitor2 = createMonitor();
+//
+//	createProcess(test0, STACK_SIZE);
+//	createProcess(test1, STACK_SIZE);
+//	createProcess(test2, STACK_SIZE);
+//
+//
+//	start();
+//	return 0;
+//}
