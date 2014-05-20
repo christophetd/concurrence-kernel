@@ -3,7 +3,6 @@
 
 #include "system_m.h"
 
-#define FLUSH (void)0;//{int i; for(i = 0 ; i < 500000 ; i++) {}}
 
 // Maximum number of processes.
 #define MAXPROCESS 10
@@ -130,18 +129,6 @@ int head(int* list){
     }
 }
 
-/* Pointer to the head of list of ready processes
-int readyList = -1;
-
-typedef struct {
-    int next;
-    Process p;
-} ProcessDescriptor;
-
-ProcessDescriptor processes[MAXPROCESS];
-int nextProcessId = 0;*/
-
-
 /***********************************************************
  ***********************************************************
                     Kernel functions
@@ -170,11 +157,7 @@ inline int currentProcessId(void) {
 }
 
 inline int currentMonitorID(void) {
-	printf(" currentMonitorID: currentProcess = %d\n", currentProcessId());
-	FLUSH
 	const ProcessDescriptor* const process = &processes[currentProcessId()];
-	printf(" currentMonitorID: stackPos = %d\n", process->monitorsStackPos);
-	FLUSH
 	return process->monitorsStack[process->monitorsStackPos-1];
 }
 
@@ -183,7 +166,6 @@ inline Monitor* currentMonitor(void) {
 }
 
 void start() {
-    printf("Starting kernel...\n");
     if (readyList == -1){
         printf("Error: No process in the ready list!\n");
         exit(1);
@@ -206,10 +188,21 @@ int createMonitor() {
 	return nextMonitorId++;
 }
 
+int isInMonitor(int processId, int monitorID) {
+	ProcessDescriptor process = processes[processId];
+	int i;
+	for (i = 0 ; i < process.monitorsStackPos ; ++i) {
+		if (process.monitorsStack[i] == monitorID) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 void enterMonitor(int monitorID) {
-	printf("#begin enterMonitor\n");
 	// Waiting on the monitor
-	if (monitors[monitorID].isOccupied) {
+	if (monitors[monitorID].isOccupied && !isInMonitor(currentProcessId(), monitorID)) {
 		// gives CPU to first process on ready list
 		addFirst(&(monitors[monitorID].readyList), removeHead(&readyList));
 		transfer(processes[head(&readyList)].p);
@@ -224,11 +217,9 @@ void enterMonitor(int monitorID) {
     const int pos = process->monitorsStackPos;
     process->monitorsStack[pos] = monitorID;
 	process->monitorsStackPos ++;
-	printf("#end enterMonitor, proc: %d, stackPos: %d\n", currentProcessId(), process->monitorsStackPos);
 }
 
 void exitMonitor(void) {
-	printf("#begin exitMonitor, stackPos: %d\n", processes[currentProcessId()].monitorsStackPos);
 	Monitor* mon = currentMonitor();
 	processes[currentProcessId()].monitorsStackPos --;
 	mon->isOccupied = 0;
@@ -238,13 +229,11 @@ void exitMonitor(void) {
 	if (*myList != -1) {
 		int nextProcessID = removeHead(myList);
 		printf(" %d is waiting on this monitor\n", nextProcessID);
-		FLUSH
 		// Put the process on the 'global' ready list
 		addFirst(&readyList, nextProcessID);
 		transfer(processes[nextProcessID].p);
 	}
 	// Doesn't do anything after transfer
-	printf("#end exitMonitor\n");
 }
 
 void wait(void) {
@@ -294,13 +283,10 @@ void notifyAll(void) {
 }
 
 void yield(void){
-	printf("#yield, stack pos is: %d\n", processes[currentProcessId()].monitorsStackPos);
     int pId = removeHead(&readyList);
     addLast(&readyList, pId);
-    printf("process %d yielding to %d\n", pId, head(&readyList));
     Process process = processes[head(&readyList)].p;
     transfer(process);
-    printf("#endYield, stack pos is: %d\n", processes[currentProcessId()].monitorsStackPos);
 }
 
 int createEvent() {
@@ -314,27 +300,41 @@ int createEvent() {
 	return nextEventId++;
 }
 
+void checkEventID(int eventID) {
+	if(eventID < 0 || eventID >= MAXEVENTS) {
+		printf("Invalid event id %d given", eventID);
+		exit(1);
+	}
+}
 void attendre(int eventID) {
+	checkEventID(eventID);
 	// Check if called in monitor
 	if(processes[currentProcessId()].monitorsStackPos != 0) {
 		printf("Error, call to event.attendre() in a monitor");
 		exit(1);
 	}
-
-	if(!events[eventID].hasHappened) {
+	if(!events[eventID].hasHappened && size(&readyList) > 1) {
 		addFirst(&(events[eventID].waitingList), removeHead(&readyList));
 		transfer(processes[head(&readyList)].p);
 	}
 }
 
+
 void declencher(int eventID) {
+	checkEventID(eventID);
 	events[eventID].hasHappened = 1;
 
+	if(size(&readyList) == 0) {
+		return;
+	}
+
+
 	// If there are process waiting on this event
-	int* const list = &events[eventID].waitingList;
+	int* const list = &(events[eventID].waitingList);
 	while(*list != -1) {
 		addLast(&readyList, removeHead(list));
 	}
+
 	yield();
 }
 

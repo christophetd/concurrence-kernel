@@ -146,6 +146,8 @@ C_SRCS += kernelTest1.c
 C_SRCS += kernel.c
 C_SRCS += system_m.c
 C_SRCS += interrupt.c
+C_SRCS += kernel2.c
+C_SRCS += kernelTest2.c
 CXX_SRCS :=
 ASM_SRCS := asm.s
 

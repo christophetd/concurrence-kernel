@@ -229,11 +229,12 @@ void test0() {
 	}
 }
 
-void test1() {
+/*void test1() {
 	int j;
 	while (1) {
 		enterMonitor(dummyMonitor2);
 		enterMonitor(dummyMonitor1);
+		enterMonitor(dummyMonitor2);
 		yield();
 		notifyAll();
 		yield();
@@ -243,6 +244,7 @@ void test1() {
 		yield();
 		PRINT(1);
 		yield();
+		exitMonitor();
 		exitMonitor();
 		exitMonitor();
 		for (j = 0; j < PAUSE; j++);
@@ -261,7 +263,7 @@ void test2() {
 		exitMonitor();
 		for (j = 0; j < PAUSE; j++);
 	}
-}
+}*/
 
 int main() {
 	IOWR_ALTERA_AVALON_PIO_DATA(LED_COLOR_BASE, LED_COLOR_RESET_VALUE);
@@ -279,6 +281,52 @@ int main() {
 	start();
 	return 0;
 }
+/*#define _PAUSE for (j = 0; j < PAUSE; j++);
+int j;
+int evt1, evt2;
+
+void test1() {
+	while(1) {
+		reinitialiser(evt1);
+		CLEAR(1);
+		_PAUSE
+		yield();
+		PRINT(1);
+		_PAUSE
+		declencher(evt1);
+		attendre(evt2);
+	}
+}
+/*
+ * - -
+ * 1 -
+ * 1 2
+ * - -
+
+
+void test2() {
+	while(1) {
+		reinitialiser(evt2);
+		CLEAR(2);
+		attendre(evt1);
+		PRINT(2);
+		_PAUSE
+		declencher(evt2);
+	}
+}
+
+//int main() {
+//	IOWR_ALTERA_AVALON_PIO_DATA(LED_COLOR_BASE, LED_COLOR_RESET_VALUE);
+//	evt1 = createEvent();
+//	evt2 = createEvent();
+//
+//	createProcess(test1, STACK_SIZE);
+//	createProcess(test2, STACK_SIZE);
+//
+//
+//	start();
+//	return 0;
+//}
 
 //int main(void) {
 //	IOWR_ALTERA_AVALON_PIO_DATA(LED_COLOR_BASE, LED_COLOR_RESET_VALUE);
@@ -294,3 +342,4 @@ int main() {
 //	start();
 //	return 0;
 //}
+*/
