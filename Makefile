@@ -142,8 +142,6 @@ ACDS_VERSION := 12.0
 ELF := kernel.elf
 
 # Paths to C, C++, and assembly source files.
-C_SRCS += kernelTest1.c
-C_SRCS += kernel.c
 C_SRCS += system_m.c
 C_SRCS += interrupt.c
 C_SRCS += kernel2.c

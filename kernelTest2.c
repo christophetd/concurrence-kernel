@@ -27,6 +27,7 @@ void initBuffer(Buffer* b) {
 }
 
 void put(Buffer* b, int m) {
+	printf("put\n");
 	enterMonitor(b->monitor);
 	while(b->full) {
 		wait();
@@ -40,12 +41,14 @@ void put(Buffer* b, int m) {
 }
 
 int get(Buffer* b) {
+	printf("get\n");
 	int m;
 
 	enterMonitor(b->monitor);
 	while (!b->full) {
 		wait();
 	}
+	printf("got\n");
 	m = b->message;
 	b->full = 0;
 	notifyAll();
@@ -55,6 +58,7 @@ int get(Buffer* b) {
 }
 
 int timedGet(Buffer *b, int timeout) {
+	printf("timedget\n");
 	int m, ret;
 
 	enterMonitor(b->monitor);
@@ -64,10 +68,13 @@ int timedGet(Buffer *b, int timeout) {
 	if (ret) {
 		m = b->message;
 		b->full = 0;
+		printf("timedgot\n");
 		notifyAll();
 	} else {
 		m = TIMEOUT;
+		printf("timedout\n");
 	}
+
 	exitMonitor();
 	return m;
 }
@@ -107,21 +114,21 @@ void producer(){
 
 			/* check button 0 */
 			if (temp%2==1) {
-				printf("Reset.\n");
+
 				put(&b0, RESET);
 			}
 
 			/* check button 1 */
 			temp = temp >> 1;
 			if (temp%2==1) {
-				printf("Start/Freeze.\n");
+
 				put(&b0, START);
 			}
 
 			/* check button 2 */
 			temp = temp >> 1;
 			if (temp%2==1) {
-				printf("Stop.\n");
+
 				put(&b0, STOP);
 			}
 
@@ -140,16 +147,19 @@ void consumer(){
 
 		switch (m) {
 		case RESET:
+			printf("Reset.\n");
 			displayOn = 1;
 			reset = 1;
 			break;
 		case START:
+			printf("Start/Freeze.\n");
 			if (started)
 				displayOn = 1 - displayOn;
 			else
 				started = 1;
 			break;
 		case STOP:
+			printf("Stop.\n");
 			started = 0;
 			break;
 		case TIMEOUT:
@@ -185,6 +195,7 @@ void countAndDisplay() {
 int main() {
 	IOWR_ALTERA_AVALON_PIO_DATA(LED_COLOR_BASE, LED_COLOR_RESET_VALUE);
 	initBuffer(&b0);
+
 	createProcess(producer, STACK_SIZE);
 	createProcess(consumer, STACK_SIZE);
 	createProcess(countAndDisplay, STACK_SIZE);

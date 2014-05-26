@@ -11,7 +11,7 @@
 #define DPRINTA(text, ...) printf("[%d] " text "\n", head(&readyList), __VA_ARGS__)
 #define DPRINT(text) DPRINTA(text, 0)
 #define ERRA(text, ...) fprintf(stderr, "[%d] Error: " text "\n", head(&readyList), __VA_ARGS__)
-#define ERR(text) ERRA(text, 0)
+#define ERR(text) { ERRA(text, 0); int i; for(i = 0; i < 75000; ++i){} }
 
 /************* Data structures **************/
 typedef struct {
@@ -43,22 +43,13 @@ MonitorDescriptor monitors[MAX_MONITORS];
 static int nextMonitorId = 0;
 
 /* Part 2 of the project variables and data structures */
-#ifndef STACK_SIZE
 #define STACK_SIZE	10000
-#endif
-
-#ifndef TIME_SLICING_FREQUENCY
 #define TIME_SLICING_FREQUENCY	20 // ms
-#endif
-
-#ifndef CLOCK_FREQUENCY
-#define CLOCK_FREQUENCY 1 // ms
-#endif
+#define CLOCK_PERIOD 1 // ms
 
 int idle_pid;
 int scheduler_pid;
-int timedWaiting[MAX_PROC];
-int timedWaitingPos = 0;
+int timedWaiting[MAX_PROC] = {0};
 
 
 /*************** Functions for process list manipulation **********/
@@ -84,6 +75,15 @@ static void addFirst(int* list, int processId){
 	*list = processId;
 }
 
+int size(int* list) {
+	int i;
+	for (i=0 ; *list != -1 ; i++) {
+		list = &processes[*list].next;
+	}
+
+	return i;
+}
+
 /* remove an element from the head of the list */
 static int removeHead(int* list){
 	if (*list == -1){
@@ -95,6 +95,19 @@ static int removeHead(int* list){
 		processes[*list].next = -1;
 		*list = next;
 		return head;
+	}
+}
+
+static void removeFromList(int* list, int processId) {
+	int i;
+
+	for (i=0 ; *list != -1 ; i++) {
+		if (*list == processId) {
+			*list = processes[processId].next;
+			processes[processId].next = -1;
+			break;
+		}
+		list = &processes[*list].next;
 	}
 }
 
@@ -115,7 +128,6 @@ static int isEmpty(int* list) {
 * **********************************************************/
 
 void createProcess (void (*f)(), int stackSize) {
-	maskInterrupts();
 	if (nextProcessId == MAX_PROC){
 		ERR("Maximum number of processes reached!");
 		exit(1);
@@ -133,25 +145,45 @@ void createProcess (void (*f)(), int stackSize) {
 
 	addLast(&readyList, nextProcessId);
 	nextProcessId++;
-	allowInterrupts();
+}
+
+int createSpecialProcess(void (*f)()) {
+
+	if (nextProcessId == MAX_PROC){
+		ERR("Maximum number of processes reached!");
+		exit(1);
+	}
+
+	unsigned int* stack = malloc(STACK_SIZE);
+	if (stack==NULL) {
+		ERR("Could not allocate stack. Exiting...");
+		exit(1);
+	}
+	processes[nextProcessId].p = newProcess(f, stack, STACK_SIZE);
+	processes[nextProcessId].next = -1;
+	processes[nextProcessId].currentMonitor = 0;
+	processes[nextProcessId].monitors[0] = -1;
+	processes[nextProcessId].timeout = -1;
+
+	int pid = nextProcessId;
+	nextProcessId++;
+	return pid;
 }
 
 static void checkAndTransfer() {
-	maskInterrupts();
-	if (isEmpty(&readyList)){
-		ERR("No processes in the ready list! Exiting...");
+	/*if (isEmpty(&readyList)){
+		/*ERR("No processes in the ready list! Exiting...");
 		exit(1);
-	}
-	Process process = processes[head(&readyList)].p;
-	transfer(process);
-	allowInterrupts();
+	}*/
+	int pid = isEmpty(&readyList) ? idle_pid : head(&readyList);
+	transfer(processes[pid].p);
 }
 
 
 
 void yield(){
 	maskInterrupts();
-	int pid = removeHead(&readyList);
+	int pid = isEmpty(&readyList) ? idle_pid : removeHead(&readyList);
 	addLast(&readyList, pid);
 	checkAndTransfer();
 	allowInterrupts();
@@ -174,9 +206,7 @@ int createMonitor(){
 }
 
 static int getCurrentMonitor(int pid) {
-	maskInterrupts();
 	int result = processes[pid].monitors[processes[pid].currentMonitor];
-	allowInterrupts();
 	return result;
 }
 
@@ -246,9 +276,166 @@ void exitMonitor() {
 	allowInterrupts();
 }
 
+void notify() {
+	maskInterrupts();
+
+	int myID = head(&readyList);
+	int myMonitor = getCurrentMonitor(myID);
+
+	if (myMonitor < 0) {
+		ERRA("Process %d called notify outside of a monitor.", myID);
+		exit(1);
+	}
+
+	if (!isEmpty(&(monitors[myMonitor].waitingList))) {
+		int pid = removeHead(&monitors[myMonitor].waitingList);
+		timedWaiting[pid] = 0;
+		addLast(&monitors[myMonitor].entryList, pid);
+	}
+
+	allowInterrupts();
+}
+
+void notifyAll() {
+	maskInterrupts();
+
+	int myID = head(&readyList);
+	int myMonitor = getCurrentMonitor(myID);
+
+	if (myMonitor < 0) {
+		ERRA("Process %d called notify outside of a monitor.", myID);
+		exit(1);
+	}
+
+	while (!isEmpty(&(monitors[myMonitor].waitingList))) {
+		int pid = removeHead(&monitors[myMonitor].waitingList);
+		timedWaiting[pid] = 0;
+		addLast(&monitors[myMonitor].entryList, pid);
+	}
+	allowInterrupts();
+}
+
+
+void idle_code() {
+	unsigned int the_answer = 42;
+	while(the_answer == 42) {
+		// Everything is fine
+	}
+}
+int createIdle() {
+    int result = createSpecialProcess(&idle_code);
+    return result;
+}
+
+// Clock process
+void scheduler() {
+	maskInterrupts();
+	int i;
+
+	// Enable clock interrupts
+	init_clock();
+	init_button();
+	unsigned int time_since_last_commutation = 0;
+	while(1) {
+		int next_pid = !isEmpty(&readyList) ? head(&readyList) : idle_pid;
+		iotransfer(processes[next_pid].p, 0);
+
+		// Rising edge has happened!
+		time_since_last_commutation += CLOCK_PERIOD;
+
+
+		/* **********/
+		/* CHECK 1  */
+		/* **********/
+		// Should we switch process? (scheduling part)
+		if(time_since_last_commutation > TIME_SLICING_FREQUENCY) {
+			int current = removeHead(&readyList);
+			addLast(&readyList, current);
+			time_since_last_commutation = 0;
+		}
+
+		/* **********/
+		/* CHECK 2  */
+		/* **********/
+		/* All the processes that have called timedWait and have not been notified / kicked out
+		 * are in the timedWaiting list.
+		 * We check one by one that none of them has timed out */
+		int dbg_proc_waiting = 0;
+		for(i = 0; i < MAX_PROC ; ++i) { // considering MAX_PROC is small, not a big performance deal
+			if (timedWaiting[i]) {
+				dbg_proc_waiting++;
+				int* timeout = &(processes[i].timeout);
+				if(*timeout <= 0) {
+					// Here, the process has timed out but was not notified
+					continue;
+				}
+
+				*timeout -= CLOCK_PERIOD;
+
+
+				if(*timeout <= 0) {
+
+					/* If it is in a monitor's waiting list, remove from that list */
+					int currMon = getCurrentMonitor(i);
+					if (currMon >= 0 && monitors[currMon].takenBy != i) {
+
+						int* list = &(monitors[currMon].waitingList);
+						removeFromList(list, i);
+						if (monitors[currMon].timesTaken > 0) {
+							addLast(&monitors[currMon].entryList, i);
+						} else {
+							monitors[currMon].timesTaken = 1;
+							monitors[currMon].takenBy = i;
+							addFirst(&readyList, i);
+						}
+					} else {
+						addFirst(&readyList, i);
+					}
+				}
+
+			}
+			
+		}
+	}
+	allowInterrupts();
+}
+int createScheduler() {
+	int result = createSpecialProcess(&scheduler);
+	return result;
+}
+
+void waitInterrupt(int peripherique) {
+	maskInterrupts();
+
+	if(peripherique == 0) {
+		ERR("Error, you are not allowed to wait clock interrupts ");
+		exit(1);
+	}
+	int caller_pid = removeHead(&readyList);
+
+	int next_pid = isEmpty(&readyList) ? idle_pid : head(&readyList);
+
+	iotransfer(processes[next_pid].p, peripherique);
+
+	// When we get back here, an interruption has happened :
+	// we regive the CPU to the caller
+	addFirst(&readyList, caller_pid);
+
+	allowInterrupts();
+}
+
+
+
+
 void wait() {
 	maskInterrupts();
 
+	_wait();
+
+	allowInterrupts();
+}
+
+void _wait() {
 	int myID = head(&readyList);
 	int myMonitor = getCurrentMonitor(myID);
 	int myTaken;
@@ -284,210 +471,7 @@ void wait() {
 
 	/* we're back, restore timesTaken */
 	monitors[myMonitor].timesTaken = myTaken;
-
-	allowInterrupts();
 }
-
-void notify() {
-	maskInterrupts();
-
-	int myID = head(&readyList);
-	int myMonitor = getCurrentMonitor(myID);
-
-	if (myMonitor < 0) {
-		ERRA("Process %d called notify outside of a monitor.", myID);
-		exit(1);
-	}
-
-	if (!isEmpty(&(monitors[myMonitor].waitingList))) {
-		int pid = removeHead(&monitors[myMonitor].waitingList);
-		addLast(&monitors[myMonitor].entryList, pid);
-	}
-
-	allowInterrupts();
-}
-
-void notifyAll() {
-	maskInterrupts();
-
-	int myID = head(&readyList);
-	int myMonitor = getCurrentMonitor(myID);
-
-	if (myMonitor < 0) {
-		ERRA("Process %d called notify outside of a monitor.", myID);
-		exit(1);
-	}
-
-	while (!isEmpty(&(monitors[myMonitor].waitingList))) {
-		int pid = removeHead(&monitors[myMonitor].waitingList);
-		addLast(&monitors[myMonitor].entryList, pid);
-	}
-	allowInterrupts();
-}
-
-
-
-/*void createProcess (void (*f)(), int stackSize) {
-	if (nextProcessId == MAX_PROC){
-		ERR("Maximum number of processes reached!");
-		exit(1);
-	}
-	unsigned int* stack = malloc(stackSize);
-	if (stack==NULL) {
-		ERR("Could not allocate stack. Exiting...");
-		exit(1);
-	}
-	processes[nextProcessId].p = newProcess(f, stack, stackSize);
-	processes[nextProcessId].next = -1;
-	processes[nextProcessId].currentMonitor = 0;
-	processes[nextProcessId].monitors[0] = -1;
-
-	addLast(&readyList, nextProcessId);
-	nextProcessId++;
-}*/
-int createSpecialProcess(void (*f)()) {
-	maskInterrupts();
-
-	if (nextProcessId == MAX_PROC){
-		ERR("Maximum number of processes reached!");
-		exit(1);
-	}
-
-	unsigned int* stack = malloc(STACK_SIZE);
-	if (stack==NULL) {
-		ERR("Could not allocate stack. Exiting...");
-		exit(1);
-	}
-	processes[nextProcessId].p = newProcess(f, stack, STACK_SIZE);
-	processes[nextProcessId].next = -1;
-	processes[nextProcessId].currentMonitor = 0;
-	processes[nextProcessId].monitors[0] = -1;
-	processes[nextProcessId].timeout = -1;
-
-	int pid = nextProcessId;
-	nextProcessId++;
-	allowInterrupts();
-	return pid;
-}
-void idle_code() {
-	unsigned int the_answer = 42;
-	while(the_answer == 42) {
-		// Everything is fine
-	}
-}
-int createIdle() {
-	maskInterrupts();
-    int result = createSpecialProcess(&idle_code);
-    allowInterrupts();
-    return result;
-}
-
-void scheduler() {
-	// Enable clock interrupts
-	init_clock();
-	unsigned int elapsed_time = 0;
-	while(1) {
-		int next_pid = !isEmpty(&readyList) ? head(&readyList) : idle_pid;
-		iotransfer(processes[next_pid].p, 0);
-
-		// Rising edge has happened!
-		elapsed_time += CLOCK_FREQUENCY;
-
-		/* **********/
-		/* CHECK 1  */
-		/* **********/
-		/* All the processes that have called timedWait and have not been notified / kicked out
-		 * are in the timedWaiting list.
-		 * We check one by one that none of them has timed out */
-		for(int i = 0; i < timedWaitingPos; ++i) {
-			int* timeout = &(processes[timedWaiting[i]].timeout);
-			if(*timeout == -1) // No timeout specified (should not happen)
-				continue;
-				
-			*timeout -= CLOCK_FREQUENCY;
-			
-			// The wait timed out, we have to unblock the process
-			if(*timeout <= 0) {
-				// Remove the process from the waiting list of the monitor it is waiting in
-				int* list = &(monitors[processes[timedWaiting[i]].currentMonitor].waitingList);
-				int current = head(list);
-				int previous = -1;
-				short found = 0;
-				int tmp;
-				
-				/* Note (TODO) : what to do if the process has been notified on time, but 
-				 * has not been removed from the timeWaiting list? */
-				 
-				 /* Note 2 (TODO) : what to do if the process has been notified on time but we
-				  * do not arrive to timedWait soon enough and therefore the timeout < 0 ? */
-				 
-				while(current != -1 && !found) {
-					if(current == timedWaiting[i]) {
-						// Found! remove from list
-						if(previous == -1) {
-							monitors[processes[timedWaiting[i]].currentMonitor].waitingList = processes[current].next; // As *list is the first element of the list
-						}
-						else {
-							processes[previous].next = processes[current].next;
-						}
-												
-						found = 1;
-					}
-					tmp = current;
-					previous = current;
-					current = processes[tmp].next;
-				}
-				
-				// Remove from timedWait list
-				--timedWaitingPos;
-				timedWaiting[timedWaitingPos] = -1;
-				
-				/* Put it on the ready list. When it will be executed, we will 
-				 * go back in the timedWait method that will detect the timeout
-				 * and return the appropriate value */
-				 addFirst(&readyList, timedWaiting[i]);
-				 
-				 /* TODO : can we add on head of the ready list? Shouldn't it be only
-				  * the current running process? */
-				
-			}
-			
-		}
-		
-		/* ***********/
-		/* CHECK 2 */
-		/* **********/
-		// Should we switch process? (scheduling part)
-		if(elapsed_time > TIME_SLICING_FREQUENCY) {
-			int current = removeHead(&readyList);
-			addLast(&readyList, current);
-			elapsed_time = 0;
-		}
-	}
-}
-int createScheduler() {
-	maskInterrupts();
-	int result = createSpecialProcess(&scheduler);
-	allowInterrupts();
-	return result;
-}
-
-void waitInterrupt(int peripherique) {
-	maskInterrupts();
-	int caller_pid = removeHead(&readyList);
-	int next_pid = isEmpty(&readyList) ? idle_pid : removeHead(&readyList);
-
-	iotransfer(processes[next_pid].p, peripherique);
-
-	// When we get back here, an interruption has happened :
-	// we regive the CPU to the caller
-	addFirst(&readyList, caller_pid);
-
-	allowInterrupts();
-}
-
-
-
 
 int timedWait(int time) {
 	maskInterrupts();
@@ -499,21 +483,18 @@ int timedWait(int time) {
 	
 	int myPid = head(&readyList);
 	int returnValue = 1;
-	
+
 	// Mark that the process is waiting
 	processes[myPid].timeout = time;
-	timedWaiting[timedWaitingPos++] = myPid;
-	
+	timedWaiting[myPid] = 1;
+
 	wait();
 	
-	/* Back again! We have either been notified or put on the ready list by the scheduler.
-	 * If it is the scheduler that 'interrupted' the wait(), it means the timeout has
-	 * expired and we should therefore return 0 */
-	
-	if(processes[myPid].timeout <= 0) {
+	if(timedWaiting[myPid] != 0) {
 		returnValue = 0;
+		timedWaiting[myPid] = 0;
 	}
-
+	
 	allowInterrupts();
 	
 	return returnValue;
@@ -522,10 +503,26 @@ int timedWait(int time) {
 void sleep(int time) {
 	maskInterrupts();
 
+	if(time < 0) {
+		ERR("[sleep] Please provide a valid timeout");
+		exit(1);
+	}
+
+	int myPid = removeHead(&readyList);
+
+	timedWaiting[myPid] = 1;
+	processes[myPid].timeout = time;
+
+	if ( isEmpty(&readyList)) {
+		transfer(processes[idle_pid].p);
+	} else {
+		transfer(processes[head(&readyList)].p);
+	}
+	//timedWaiting[myPid] = 0;
+
 	allowInterrupts();
 }
 void start(){
-	maskInterrupts();
 
 	if(isEmpty(&readyList)) {
 		ERR("No processes in the ready list! Exiting...");
@@ -538,5 +535,4 @@ void start(){
 
 	//checkAndTransfer();
 	transfer(processes[scheduler_pid].p);
-	allowInterrupts();
 }
